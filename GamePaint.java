@@ -2,8 +2,6 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.util.ArrayList;
-import java.io.File;
-import javax.imageio.ImageIO;
 
 public class GamePaint extends JPanel implements Runnable {
     public static final int WIDTH = 1000, HEIGHT = 600;
@@ -48,11 +46,7 @@ public class GamePaint extends JPanel implements Runnable {
         }
         setPreferredSize(new Dimension(WIDTH, HEIGHT));
         setBackground(Color.white); //สีพื้นหลัง (ใช้ตอนโหลดรูปไม่ได้)
-        try {
-            background = ImageIO.read(new File("background.png"));
-        } catch (Exception e) {
-            System.out.println("Failed Upload background.png : " + e.getMessage());
-        }
+        background = GameObject.loadImage("background.png");
         setFocusable(true); //รับปุ่มกด
 
         addKeyListener(new KeyAdapter() {

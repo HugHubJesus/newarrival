@@ -1,7 +1,4 @@
 import java.awt.*;
-import java.io.File;
-
-import javax.imageio.ImageIO;
 
 public class GameFloor extends GameObject {
     private static Image sprite;
@@ -10,11 +7,7 @@ public class GameFloor extends GameObject {
     public GameFloor(int x, int y, int width, int height) {
         super(x, y, width, height);
         if (sprite == null) {
-            try {
-                sprite = ImageIO.read(new File("ground.png"));
-            } catch (Exception e) {
-                System.out.println("Failed Upload ground.png : " + e.getMessage());
-            }
+            sprite = GameObject.loadImage("ground.png");
         }
     }
 

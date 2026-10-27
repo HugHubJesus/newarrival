@@ -1,7 +1,4 @@
 import java.awt.*;
-import java.io.File;
-
-import javax.imageio.ImageIO;
 
 // ประตูทางออก เดินชนแล้วผ่านด่าน
 // กับดัก: ถ้า runToX ไม่เท่ากับ x พอผู้เล่นเข้าใกล้ ประตูจะหนีไปอยู่ที่ runToX
@@ -13,11 +10,7 @@ public class Door extends GameObject {
         super(x, y, 40, 60);
         this.runToX = runToX;
         if (sprite == null) {
-            try {
-                sprite = ImageIO.read(new File("door.png"));
-            } catch (Exception e) {
-                System.out.println("Failed Upload door.png : " + e.getMessage());
-            }
+            sprite = GameObject.loadImage("door.png");
         }
     }
 

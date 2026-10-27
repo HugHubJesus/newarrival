@@ -1,7 +1,4 @@
 import java.awt.*;
-import java.io.File;
-
-import javax.imageio.ImageIO;
 
 public class Spike extends GameObject {
     public static final int SIZE = 30;
@@ -15,11 +12,7 @@ public class Spike extends GameObject {
         this.triggerX = triggerX;
         active = (triggerX == 0);
         if (sprite_A == null) {
-            try {
-                sprite_A = ImageIO.read(new File("spike.png"));   // เปลี่ยนชื่อไฟล์ตามที่คุณตั้ง
-            } catch (Exception e) {
-                System.out.println("Failed Upload : " + e.getMessage());
-            }
+            sprite_A = GameObject.loadImage("spike.png");
         }
     }
 
