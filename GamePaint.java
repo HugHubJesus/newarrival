@@ -7,10 +7,10 @@ public class GamePaint extends JPanel implements Runnable {
     public static final int WIDTH = 1000, HEIGHT = 600;
     private static final int SPAWN_X = 50, SPAWN_Y = 410;
 
-    private int levelNumber = 1;
+    private int levelNumber = 1;    // 0 = หน้า lobby รอเพื่อน (เฉพาะตอนเล่นกับเพื่อน)
     private int deaths = 0;
     private boolean win = false;
-    private Level level = new Level(levelNumber);
+    private Level level = new Level(1);
     private Image background;
 
     // ช่วงเปลี่ยนฉาก (ตาย / เข้าประตู) นับถอยหลังจาก WAIT_TIME ถึง 0 = เล่นปกติ
@@ -23,6 +23,7 @@ public class GamePaint extends JPanel implements Runnable {
 
     // สีไก่ตามเลขผู้เล่น (id 0 = Server) ทุกเครื่องใช้ตารางเดียวกัน เลยเห็นสีตรงกัน
     public static final String[] COLORS = {"white", "brown", "black", "gray", "golden"};
+    private Image[] icons = new Image[Network.MAX_PLAYERS];   // รูปไก่แต่ละสี ไว้โชว์ในหน้า lobby
 
     // เล่นกับเพื่อน (network = null คือเล่นคนเดียว)
     private Network network;
@@ -32,10 +33,17 @@ public class GamePaint extends JPanel implements Runnable {
     private int[] lastFriendDeaths = new int[Network.MAX_PLAYERS];      // จำนวนตายของเพื่อนรอบที่แล้ว (-1 = ยังไม่เคยเห็น)
     private boolean friendDied = false; // เริ่มใหม่เพราะเพื่อนตาย (ไว้โชว์ข้อความ)
 
+    // ปุ่ม: START (หน้า lobby เฉพาะคนเปิดห้อง) / PLAY AGAIN (ตอนจบเกม)
+    private JButton startButton = new JButton("START");
+    private JButton restartButton = new JButton("PLAY AGAIN");
+    private boolean startClicked = false;     // กดปุ่มแล้ว ให้เทรดเกมเป็นคนจัดการ
+    private boolean restartClicked = false;
+
     public GamePaint(Network network) {
         this.network = network;
         if (network != null) {
             myId = network.myId;
+            levelNumber = 0;   // เล่นกับเพื่อน เริ่มที่หน้า lobby
         }
         player = new Player(SPAWN_X, SPAWN_Y, COLORS[myId]);
         for (int i = 0; i < Network.MAX_PLAYERS; i++) {
@@ -43,11 +51,36 @@ public class GamePaint extends JPanel implements Runnable {
                 friends[i] = new Player(SPAWN_X, SPAWN_Y, COLORS[i]);
             }
             lastFriendDeaths[i] = -1;
+            icons[i] = GameObject.loadImage(COLORS[i] + "/frames/stand_right_0.png");
         }
         setPreferredSize(new Dimension(WIDTH, HEIGHT));
         setBackground(Color.white); //สีพื้นหลัง (ใช้ตอนโหลดรูปไม่ได้)
         background = GameObject.loadImage("background.png");
         setFocusable(true); //รับปุ่มกด
+
+        // วางปุ่มเองตามตำแหน่ง x, y
+        setLayout(null);
+        startButton.setBounds(400, 470, 200, 50);
+        restartButton.setBounds(400, 300, 200, 50);
+        startButton.setFont(new Font("Arial", Font.BOLD, 24));
+        restartButton.setFont(new Font("Arial", Font.BOLD, 24));
+        startButton.setFocusable(false);     // กดปุ่มแล้วคีย์บอร์ดยังอยู่ที่เกม
+        restartButton.setFocusable(false);
+        startButton.setVisible(false);
+        restartButton.setVisible(false);
+        add(startButton);
+        add(restartButton);
+
+        startButton.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                startClicked = true;
+            }
+        });
+        restartButton.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                restartClicked = true;
+            }
+        });
 
         addKeyListener(new KeyAdapter() {
             @Override
@@ -71,6 +104,16 @@ public class GamePaint extends JPanel implements Runnable {
         new Thread(this).start();
     }
 
+    // เริ่มเล่นใหม่ตั้งแต่ด่าน 1
+    private void restart() {
+        levelNumber = 1;
+        win = false;
+        atDoor = false;
+        waitTime = 0;
+        level = new Level(1);
+        player.respawn(SPAWN_X, SPAWN_Y);
+    }
+
     @Override
     public void run() {
         while (true) {
@@ -79,7 +122,7 @@ public class GamePaint extends JPanel implements Runnable {
             if (network != null) {
                 network.send(levelNumber, player.getBounds().x, player.getBounds().y, deaths, atDoor);
                 for (int i = 0; i < Network.MAX_PLAYERS; i++) {
-                    if (i == myId || network.friendLevel[i] == 0) continue;   // ตัวเอง หรือไม่มีคนนี้
+                    if (i == myId || network.friendLevel[i] < 0) continue;   // ตัวเอง หรือไม่มีคนนี้
                     friends[i].moveTo(network.friendX[i], network.friendY[i]);
                     if (network.friendLevel[i] == levelNumber) {
                         here.add(friends[i]);
@@ -96,14 +139,35 @@ public class GamePaint extends JPanel implements Runnable {
                         }
                     }
 
-                    // เพื่อนไปด่านถัดไปแล้ว (เครื่องเราช้าไปนิด หรือเราเพิ่งเข้ามาทีหลัง) = เราไปด้วย จะได้ไม่ค้างคนละด่าน
-                    if (network.friendLevel[i] > levelNumber && waitTime == 0 && !win) {
+                    // เพื่อนไปด่านถัดไปแล้ว (หรือคนเปิดห้องกด START) = เราไปด้วย จะได้ไม่ค้างคนละด่าน
+                    // (ไม่นับเพื่อนที่จบเกมแล้ว ไม่งั้นกด PLAY AGAIN แล้วจะโดนดึงกลับไปหน้าจบ)
+                    if (network.friendLevel[i] > levelNumber && network.friendLevel[i] <= Level.LAST_LEVEL
+                            && waitTime == 0 && !win) {
                         dying = false;
                         waitTime = WAIT_TIME;
+                    }
+
+                    // เราจบเกมแล้ว แต่เพื่อนกด PLAY AGAIN (กลับไปด่าน 1) = เราเล่นใหม่ด้วย
+                    if (win && network.friendLevel[i] == 1) {
+                        restartClicked = true;
                     }
                 }
             }
             friendsHere = here;
+
+            // ปุ่ม START โชว์เฉพาะคนเปิดห้อง ตอนอยู่หน้า lobby / ปุ่ม PLAY AGAIN โชว์ตอนจบเกม
+            startButton.setVisible(network != null && myId == 0 && levelNumber == 0 && waitTime == 0);
+            restartButton.setVisible(win);
+
+            if (startClicked) {
+                startClicked = false;
+                dying = false;
+                waitTime = WAIT_TIME;   // เปลี่ยนฉากจาก lobby ไปด่าน 1
+            }
+            if (restartClicked) {
+                restartClicked = false;
+                restart();
+            }
 
             if (waitTime > 0) {
                 // กำลังเปลี่ยนฉาก เกมหยุดนิ่ง
@@ -120,7 +184,7 @@ public class GamePaint extends JPanel implements Runnable {
                         atDoor = false;
                     }
                 }
-            } else if (!win) {
+            } else if (!win && levelNumber > 0) {
                 if (!atDoor) {
                     player.update(level.getFloors()); //อัปเดตตัวละคร (เข้าประตูแล้วไม่ขยับ)
                 }
@@ -155,10 +219,13 @@ public class GamePaint extends JPanel implements Runnable {
         if (network == null) return levelNumber < Level.FIRST_COOP_LEVEL;
         int online = 0;
         for (int i = 0; i < Network.MAX_PLAYERS; i++) {
-            if (i == myId || network.friendLevel[i] == 0) continue;
+            if (i == myId || network.friendLevel[i] < 0) continue;
             online++;
-            if (network.friendLevel[i] != levelNumber || !network.friendAtDoor[i]) {
-                return false;   // ยังมีคนไม่เข้าประตู
+            if (network.friendLevel[i] < levelNumber) {
+                return false;   // ยังมีคนตามมาไม่ถึงด่านนี้
+            }
+            if (network.friendLevel[i] == levelNumber && !network.friendAtDoor[i]) {
+                return false;   // ยังมีคนไม่เข้าประตู (ถ้าเพื่อนไปด่านถัดไปแล้ว ถือว่าเข้าแล้ว)
             }
         }
         if (levelNumber >= Level.FIRST_COOP_LEVEL && online == 0) return false;   // ด่าน 2 คน แต่ไม่มีเพื่อน
@@ -173,36 +240,72 @@ public class GamePaint extends JPanel implements Runnable {
         return false;
     }
 
+    // หน้า lobby: รายชื่อผู้เล่นที่เข้ามาแล้ว
+    private void drawLobby(Graphics2D g2) {
+        g2.setColor(new Color(255, 255, 255, 200));   // กล่องขาวโปร่งแสง
+        g2.fillRoundRect(250, 60, 500, 480, 30, 30);
+
+        g2.setColor(Color.BLACK);
+        g2.setFont(new Font("Arial", Font.BOLD, 40));
+        g2.drawString("LOBBY", 435, 115);
+
+        g2.setFont(new Font("Arial", Font.BOLD, 22));
+        int y = 150;
+        for (int i = 0; i < Network.MAX_PLAYERS; i++) {
+            boolean here = (i == myId) || network.friendLevel[i] >= 0;
+            if (!here) continue;
+            g2.drawImage(icons[i], 300, y, 50, 50, null);
+            String text = "Player " + (i + 1) + " (" + COLORS[i] + ")";
+            if (i == 0) text += "  - HOST";
+            if (i == myId) text += "  - YOU";
+            g2.drawString(text, 370, y + 33);
+            y += 60;
+        }
+
+        g2.setFont(new Font("Arial", Font.PLAIN, 20));
+        if (myId == 0) {
+            g2.drawString("Press START when everyone is here", 340, 455);
+        } else {
+            g2.drawString("Waiting for host to start...", 385, 500);
+        }
+    }
+
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
         Graphics2D g2 = (Graphics2D) g;
+        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                            RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);   // ภาพพิกเซลไม่เบลอ
         if (background != null) {
             g2.drawImage(background, 0, 0, WIDTH, HEIGHT, null);   // วาดพื้นหลังก่อน ของอื่นจะได้ทับข้างบน
         }
 
         boolean firstHalf = waitTime > WAIT_TIME / 2;   // ยังไม่ได้เปลี่ยนด่าน
 
-        level.draw(g2);
-        for (Player f : friendsHere) {
-            if (!friendAtDoor(f)) {   // เพื่อนเข้าประตูแล้วก็ไม่ต้องวาด
-                f.draw(g2);
+        if (levelNumber == 0) {
+            drawLobby(g2);
+        } else {
+            level.draw(g2);
+            for (Player f : friendsHere) {
+                if (!friendAtDoor(f)) {   // เพื่อนเข้าประตูแล้วก็ไม่ต้องวาด
+                    f.draw(g2);
+                }
             }
-        }
-        if (!atDoor && !(firstHalf && !dying)) {   // เข้าประตูแล้ว ไก่หายเข้าไปในประตู
-            player.draw(g2);
-        }
+            if (!atDoor && !(firstHalf && !dying)) {   // เข้าประตูแล้ว ไก่หายเข้าไปในประตู
+                player.draw(g2);
+            }
 
-        g2.setColor(Color.BLACK);
-        g2.setFont(new Font("Arial", Font.BOLD, 20));
-        g2.drawString("Level " + levelNumber + "   Deaths: " + deaths, 20, 30);
-        if (network == null && levelNumber >= Level.FIRST_COOP_LEVEL && !win) {
-            g2.drawString("2 PLAYERS LEVEL - need a friend!", 20, 60);
-        } else if (network != null && waitTime == 0 && !win && atDoor) {
-            g2.drawString("Waiting for friends at the door...", 20, 60);
-        }
-        if (network != null) {
-            g2.drawString("You are player " + (myId + 1) + " (" + COLORS[myId] + ")   Players here: " + (friendsHere.size() + 1), 20, 90);
+            g2.setColor(Color.BLACK);
+            g2.setFont(new Font("Arial", Font.BOLD, 20));
+            g2.drawString("Level " + Math.min(levelNumber, Level.LAST_LEVEL) + "   Deaths: " + deaths, 20, 30);   // จบเกมแล้วไม่ให้ขึ้น Level 8
+            if (network == null && levelNumber >= Level.FIRST_COOP_LEVEL && !win) {
+                g2.drawString("2 PLAYERS LEVEL - need a friend!", 20, 60);
+            } else if (network != null && waitTime == 0 && !win && atDoor) {
+                g2.drawString("Waiting for friends at the door...", 20, 60);
+            }
+            if (network != null) {
+                g2.drawString("You are player " + (myId + 1) + " (" + COLORS[myId] + ")   Players here: " + (friendsHere.size() + 1), 20, 90);
+            }
         }
 
         if (waitTime > 0) {
@@ -215,7 +318,7 @@ public class GamePaint extends JPanel implements Runnable {
             }
             g2.fillRect(0, 0, WIDTH, HEIGHT);
 
-            if (firstHalf) {
+            if (firstHalf && levelNumber > 0) {   // ออกจาก lobby ไม่ต้องโชว์ข้อความ
                 g2.setColor(Color.WHITE);
                 g2.setFont(new Font("Arial", Font.BOLD, 60));
                 if (dying && friendDied) {
@@ -229,6 +332,7 @@ public class GamePaint extends JPanel implements Runnable {
         }
 
         if (win) {
+            g2.setColor(Color.BLACK);
             g2.setFont(new Font("Arial", Font.BOLD, 60));
             g2.drawString("YOU WIN!", 360, 250);
         }

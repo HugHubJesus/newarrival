@@ -12,7 +12,7 @@ public class Network {
     private PrintWriter toServer;                                       // ใช้ตอนเป็น Client
     private PrintWriter[] toClients = new PrintWriter[MAX_PLAYERS];    // ใช้ตอนเป็น Server (ช่องละคน ตาม id)
 
-    // ข้อมูลผู้เล่นแต่ละคน ตามเลข id (friendLevel = 0 คือไม่มีคนนี้ หรือหลุดไปแล้ว)
+    // ข้อมูลผู้เล่นแต่ละคน ตามเลข id (friendLevel = -1 คือไม่มีคนนี้ หรือหลุดไปแล้ว, 0 = อยู่หน้า lobby)
     public int[] friendLevel = new int[MAX_PLAYERS];
     public int[] friendX = new int[MAX_PLAYERS];
     public int[] friendY = new int[MAX_PLAYERS];
@@ -21,6 +21,9 @@ public class Network {
 
     // ip = null คือเปิดห้องเป็น Server, มี ip คือเข้าห้องเป็น Client
     public Network(String ip) throws IOException {
+        for (int i = 0; i < MAX_PLAYERS; i++) {
+            friendLevel[i] = -1;   // ตอนแรกยังไม่มีใคร
+        }
         if (ip == null) {
             isServer = true;
             ServerSocket serverSocket = new ServerSocket(PORT);
@@ -69,10 +72,10 @@ public class Network {
                 } catch (IOException e) {
                 }
                 System.out.println("Player " + (fromId + 1) + " left the game");
-                friendLevel[fromId] = 0;
+                friendLevel[fromId] = -1;
                 if (isServer) {
                     toClients[fromId] = null;
-                    sendToClients(fromId + " 0 0 0 0 0", fromId);   // บอกคนอื่นว่าคนนี้หลุดแล้ว
+                    sendToClients(fromId + " -1 0 0 0 0", fromId);   // บอกคนอื่นว่าคนนี้หลุดแล้ว
                 }
             }
         });
